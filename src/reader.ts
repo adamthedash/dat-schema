@@ -212,18 +212,26 @@ const DIRECTIVE_INTERVAL = {
 
 class VersionedTypedefNode<T> implements Iterable<[ValidFor, T]> {
   constructor (
-    public vBase?: T,
-    public vOverride?: T,
+    public vBase: T | undefined,
+    public vOverridePoe1: T | undefined,
+    public vOverridePoe2: T | undefined,
   ) {}
 
   *[Symbol.iterator](): Iterator<[ValidFor, T]> {
-    if (this.vBase != null && this.vOverride != null) {
-      yield [ValidFor.PoE1, this.vBase];
-      yield [ValidFor.PoE2, this.vOverride];
-    } else if (this.vOverride != null) {
-      yield [ValidFor.PoE2, this.vOverride];
-    } else if (this.vBase != null) {
-      yield [ValidFor.Common, this.vBase];
+    if (this.vOverridePoe1 == null && this.vOverridePoe2 == null) {
+      if (this.vBase != null) {
+        yield [ValidFor.Common, this.vBase];
+      }
+    } else {
+      const poe1 =  this.vOverridePoe1 ?? this.vBase;
+      if (poe1 != null) {
+        yield [ValidFor.PoE1, poe1];
+      }
+
+      const poe2 =  this.vOverridePoe2 ?? this.vBase;
+      if (poe2 != null) {
+        yield [ValidFor.PoE2, poe2];
+      }
     }
   }
 }
@@ -231,20 +239,34 @@ class VersionedTypedefNode<T> implements Iterable<[ValidFor, T]> {
 class VersionedTypedefMap<T extends TypeDefinitionNode> {
   readonly data = new Map<string, VersionedTypedefNode<T>>();
 
-  add(typeNode: T, override: boolean): boolean {
-    const existingNode = this.data.get(typeNode.name.value);
+  constructor (
+    readonly allowSharing: boolean
+  ) {}
+
+  add(typeNode: T, game: Int | undefined): boolean {
+    var existingNode = this.data.get(typeNode.name.value);
     if (!existingNode) {
-      this.data.set(typeNode.name.value, new VersionedTypedefNode(
-        !override ? typeNode : undefined,
-        override ? typeNode : undefined,
-      ));
-    } else if (override) {
-      if (existingNode.vOverride != null) return false;
-      existingNode.vOverride = typeNode;
-    } else {
-      if (existingNode.vBase != null) return false;
-      existingNode.vBase = typeNode;
+      existingNode = new VersionedTypedefNode();
+      this.data.set(typeNode.name.value, existingNode);
     }
+
+    switch (game) {
+      case undefined:
+        if (existingNode.vBase != null) return false;
+        existingNode.vBase = typeNode;
+        break;
+      case 1:
+        if (existingNode.vOverridePoe1 != null) return false;
+        existingNode.vOverridePoe1 = typeNode;
+        break;
+      case 2:
+        if (existingNode.vOverridePoe2 != null) return false;
+        existingNode.vOverridePoe2 = typeNode;
+        break;
+      default:
+        throw new GraphQLError(`Bad game version: ${game}`);
+    }
+
     return true;
   }
 }
@@ -253,19 +275,19 @@ class ScopedTypedefMap<T> {
   constructor (
     private data: ReadonlyMap<string, VersionedTypedefNode<T>>,
     private ver: ValidFor
-  ) {
-    if (ver === ValidFor.Common) {
-      this.ver = ValidFor.PoE1;
-    }
-  }
+  ) {}
 
   get(name: string): T | undefined {
     const node = this.data.get(name);
     if (node != null) {
       if (this.ver === ValidFor.PoE1) {
-        return node.vBase;
+        return node.vOverridePoe1 ?? node.vBase;
+      } else if (this.ver === ValidFor.PoE2) {
+        return node.vOverridePoe2 ?? node.vBase;
       } else {
-        return node.vOverride ?? node.vBase;
+        // Unclear what we should give back here. If it's a common table then the reference 
+        // could be to either game
+        return node.vBase ?? node.vOverridePoe1 ?? node.vOverridePoe2;
       }
     }
   }
@@ -294,16 +316,22 @@ export function readSchemaSources(
         throw new GraphQLError('Unsupported definition.', { nodes: typeNode });
       }
 
-      const override = source.name.startsWith('poe2');
+      var game = undefined;
+      if ( source.name.startsWith('poe1') ) {
+        game = 1;
+      } else if ( source.name.startsWith('poe2') ) {
+        game = 2;
+      }
+
       if (typeNode.kind === 'EnumTypeDefinition') {
-        if (!enumDefsMap.add(typeNode, override)) {
+        if (!enumDefsMap.add(typeNode, game)) {
           throw new GraphQLError(
             'Enum with this name has already been defined.',
             { nodes: typeNode.name }
           );
         }
       } else if (typeNode.kind === 'ObjectTypeDefinition') {
-        if (!typeDefsMap.add(typeNode, override)) {
+        if (!typeDefsMap.add(typeNode, game)) {
           throw new GraphQLError(
             'Table with this name has already been defined.',
             { nodes: typeNode.name }
