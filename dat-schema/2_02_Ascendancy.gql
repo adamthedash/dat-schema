@@ -61,7 +61,7 @@ type LabyrinthSecretEffects {
   Buff_BuffDefinitionsKey: BuffDefinitions
   Buff_StatValues: [i32]
   OTFile: string @file(ext: ".ot")
-  _: [_]
+  Buff_StatValuesRuthless: [i32]
 }
 
 enum LabyrinthSecretLocations @indexing(first: 0) { _ }
@@ -146,7 +146,7 @@ type LabyrinthCraftOptions {
   _: bool
   Achievement: [AchievementItems]
   _: bool
-  _: rid
+  SoundEffect: SoundEffects
   _: i32
 }
 
